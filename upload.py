@@ -1,10 +1,20 @@
+# Google Photos
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import AuthorizedSession
 from google.oauth2.credentials import Credentials
+
+# Capture photos from webcams
+from picamera import PiCamera
+from subprocess import call
+
+from datetime import datetime
+
 import json
-import os.path
+import os
 import argparse
 import logging
+import time
+
 
 def parse_args(arg_input=None):
     parser = argparse.ArgumentParser(description='Upload photos to Google Photos.')
@@ -129,7 +139,7 @@ def create_or_retrieve_album(session, album_title):
         logging.error("Could not find or create photo album '\{0}\'. Server Response: {1}".format(album_title, resp))
         return None
 
-def upload_photos(session, photo_file_list, album_name):
+def upload_photos(session, photo_file_name, album_name):
 
     album_id = create_or_retrieve_album(session, album_name) if album_name else None
 
@@ -140,40 +150,38 @@ def upload_photos(session, photo_file_list, album_name):
     session.headers["Content-type"] = "application/octet-stream"
     session.headers["X-Goog-Upload-Protocol"] = "raw"
 
-    for photo_file_name in photo_file_list:
+    try:
+        photo_file = open(photo_file_name, mode='rb')
+        photo_bytes = photo_file.read()
+    except OSError as err:
+        logging.error("Could not read file \'{0}\' -- {1}".format(photo_file_name, err))
+        return
 
-            try:
-                photo_file = open(photo_file_name, mode='rb')
-                photo_bytes = photo_file.read()
-            except OSError as err:
-                logging.error("Could not read file \'{0}\' -- {1}".format(photo_file_name, err))
-                continue
+    session.headers["X-Goog-Upload-File-Name"] = os.path.basename(photo_file_name)
 
-            session.headers["X-Goog-Upload-File-Name"] = os.path.basename(photo_file_name)
+    logging.info("Uploading photo -- \'{}\'".format(photo_file_name))
 
-            logging.info("Uploading photo -- \'{}\'".format(photo_file_name))
+    upload_token = session.post('https://photoslibrary.googleapis.com/v1/uploads', photo_bytes)
 
-            upload_token = session.post('https://photoslibrary.googleapis.com/v1/uploads', photo_bytes)
+    if (upload_token.status_code == 200) and (upload_token.content):
 
-            if (upload_token.status_code == 200) and (upload_token.content):
+        create_body = json.dumps({"albumId":album_id, "newMediaItems":[{"description":"","simpleMediaItem":{"uploadToken":upload_token.content.decode()}}]}, indent=4)
 
-                create_body = json.dumps({"albumId":album_id, "newMediaItems":[{"description":"","simpleMediaItem":{"uploadToken":upload_token.content.decode()}}]}, indent=4)
+        resp = session.post('https://photoslibrary.googleapis.com/v1/mediaItems:batchCreate', create_body).json()
 
-                resp = session.post('https://photoslibrary.googleapis.com/v1/mediaItems:batchCreate', create_body).json()
+        logging.debug("Server response: {}".format(resp))
 
-                logging.debug("Server response: {}".format(resp))
-
-                if "newMediaItemResults" in resp:
-                    status = resp["newMediaItemResults"][0]["status"]
-                    if status.get("code") and (status.get("code") > 0):
-                        logging.error("Could not add \'{0}\' to library -- {1}".format(os.path.basename(photo_file_name), status["message"]))
-                    else:
-                        logging.info("Added \'{}\' to library and album \'{}\' ".format(os.path.basename(photo_file_name), album_name))
-                else:
-                    logging.error("Could not add \'{0}\' to library. Server Response -- {1}".format(os.path.basename(photo_file_name), resp))
-
+        if "newMediaItemResults" in resp:
+            status = resp["newMediaItemResults"][0]["status"]
+            if status.get("code") and (status.get("code") > 0):
+                logging.error("Could not add \'{0}\' to library -- {1}".format(os.path.basename(photo_file_name), status["message"]))
             else:
-                logging.error("Could not upload \'{0}\'. Server Response - {1}".format(os.path.basename(photo_file_name), upload_token))
+                logging.info("Added \'{}\' to library and album \'{}\' ".format(os.path.basename(photo_file_name), album_name))
+        else:
+            logging.error("Could not add \'{0}\' to library. Server Response -- {1}".format(os.path.basename(photo_file_name), resp))
+
+    else:
+        logging.error("Could not upload \'{0}\'. Server Response - {1}".format(os.path.basename(photo_file_name), upload_token))
 
     try:
         del(session.headers["Content-type"])
@@ -184,16 +192,31 @@ def upload_photos(session, photo_file_list, album_name):
 
 def main():
 
-    args = parse_args()
+    camera = PiCamera()
 
-    logging.basicConfig(format='%(asctime)s %(module)s.%(funcName)s:%(levelname)s:%(message)s',
-                    datefmt='%m/%d/%Y %I_%M_%S %p',
-                    filename=args.log_file,
-                    level=logging.INFO)
-
-    session = get_authorized_session(args.auth_file)
-
-    upload_photos(session, args.photos, args.album_name)
+    # create a session with Google Photos
+    #session = get_authorized_session(args.auth_file)
+    
+    while True:
+        dt_string = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
+        
+        # paths for each jpg file
+        usb_cam_photo_path = f"./cam-photos/USB-Cam {dt_string}.jpg"
+        ribbon_cam_photo_path = f"./cam-photos/Ribbon-Cam {dt_string}.jpg"
+        
+        # take photos on both webcams
+        call(["fswebcam", "-d","/dev/video0", "-r", "1920x1080", "--no-banner", usb_cam_photo_path])
+        camera.capture(ribbon_cam_photo_path) 
+        
+        # send the jpgs to google photos
+        #upload_photos(session, 'image' + str(counter) + '.jpg', args.album_name)
+        
+        # delete the jpgs off local storage
+        os.remove(usb_cam_photo_path)
+        os.remove(ribbon_cam_photo_path)
+        
+        # sleep for 5 minutes
+        time.sleep(300)
 
     # As a quick status check, dump the albums and their key attributes
 
