@@ -7,13 +7,16 @@ from google.oauth2.credentials import Credentials
 from picamera import PiCamera
 from subprocess import call
 
-from datetime import datetime
+from datetime import datetime, timedelta
+from astral.sun import sun
+from astral import LocationInfo
 
 import json
 import os
 import argparse
 import logging
 import time
+import pytz
 
 
 def parse_args(arg_input=None):
@@ -190,40 +193,71 @@ def upload_photos(session, photo_file_name, album_name):
     except KeyError:
         pass
 
+def time_until_daylight(dt_sunrise, dt_sunset, loc):
+    present = datetime.now(pytz.timezone(loc.timezone))
+    
+    # currently bewteen sunrise and sunset, it's already daylight
+    if dt_sunrise <= present <= dt_sunset:
+        return 0
+    
+    # if there hasn't been a sunrise for the day yet, wait for it
+    elif present < dt_sunrise:
+        return (dt_sunrise - present).total_seconds()
+    
+    # if the day is past sunset, wait for tommorow's sunrise
+    elif present > dt_sunset:
+        tommorrow = datetime.today() + timedelta(days=1)
+        tmrw_times = sun(loc.observer, tommorrow, tzinfo=loc.timezone)
+        return (tmrw_times["sunrise"] - present).total_seconds()
+    
+    raise Exception("No possible criteria for time until daylight was met.")    
+
 def main():
 
     camera = PiCamera()
+    camera.resolution = (3280, 2464)
 
     # create a session with Google Photos
     #session = get_authorized_session(args.auth_file)
     
+    # get current location to determine sunrise and sunset
+    with open('location.json') as loc_file:
+        data = json.load(loc_file)
+        loc = LocationInfo()
+        loc.timezone = data['general']['timezone']
+        loc.latitude = data['coordinates']['latitude'] 
+        loc.longitude = data['coordinates']['longitude']
+        
+    times = sun(loc.observer, date=datetime.now(), tzinfo=loc.timezone)
+    
+    sleep_time = time_until_daylight(times["sunrise"], times["sunset"], loc)
+    if sleep_time != 0:
+        time.sleep(sleep_time)
+    
     while True:
-        dt_string = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
+        present_dt = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
         
         # paths for each jpg file
-        usb_cam_photo_path = f"./cam-photos/USB-Cam {dt_string}.jpg"
-        ribbon_cam_photo_path = f"./cam-photos/Ribbon-Cam {dt_string}.jpg"
+        usb_cam_photo_path = f"./cam-photos/USB-Cam {present_dt}.jpg"
+        ribbon_cam_photo_path = f"./cam-photos/Ribbon-Cam {present_dt}.jpg"
         
         # take photos on both webcams
-        call(["fswebcam", "-d","/dev/video0", "-r", "1920x1080", "--no-banner", usb_cam_photo_path])
+        call(["fswebcam", "-d","/dev/video0", "-r", "1920x1080", "-S", "20", "--no-banner", usb_cam_photo_path])
         camera.capture(ribbon_cam_photo_path) 
         
         # send the jpgs to google photos
-        #upload_photos(session, 'image' + str(counter) + '.jpg', args.album_name)
+        upload_photos(session, 'image' + str(counter) + '.jpg', args.album_name)
         
         # delete the jpgs off local storage
         os.remove(usb_cam_photo_path)
         os.remove(ribbon_cam_photo_path)
         
-        # sleep for 5 minutes
-        time.sleep(300)
-
-    # As a quick status check, dump the albums and their key attributes
-
-    print("{:<50} | {:>8} | {} ".format("PHOTO ALBUM","# PHOTOS", "IS WRITEABLE?"))
-
-    for a in getAlbums(session):
-        print("{:<50} | {:>8} | {} ".format(a["title"],a.get("mediaItemsCount", "0"), str(a.get("isWriteable", False))))
+        # regular sleep interval is 5 minutes, otherwise sleep until next sunrise
+        sleep_time = time_until_daylight(times["sunrise"], times["sunset"], loc)
+        if sleep_time == 0:
+            time.sleep(300)
+        else:
+            time.sleep(sleep_time)
 
 if __name__ == '__main__':
   main()
