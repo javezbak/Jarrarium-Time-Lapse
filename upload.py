@@ -214,13 +214,15 @@ def time_until_daylight(dt_sunrise, dt_sunset, loc):
 
 def main():
 
+    # create a session with Google Photos
+    args = parse_args()# --auth client_id.json --album test
+    session = get_authorized_session(args.auth_file)
+
+    # initialize ribbon camera
     camera = PiCamera()
     camera.resolution = (3280, 2464)
 
-    # create a session with Google Photos
-    #session = get_authorized_session(args.auth_file)
-    
-    # get current location to determine sunrise and sunset
+    # get current location
     with open('location.json') as loc_file:
         data = json.load(loc_file)
         loc = LocationInfo()
@@ -228,8 +230,10 @@ def main():
         loc.latitude = data['coordinates']['latitude'] 
         loc.longitude = data['coordinates']['longitude']
         
+    # get sunrise and sunset times    
     times = sun(loc.observer, date=datetime.now(), tzinfo=loc.timezone)
     
+    # determine time until next daylight, sleep until then
     sleep_time = time_until_daylight(times["sunrise"], times["sunset"], loc)
     if sleep_time != 0:
         time.sleep(sleep_time)
@@ -246,7 +250,8 @@ def main():
         camera.capture(ribbon_cam_photo_path) 
         
         # send the jpgs to google photos
-        upload_photos(session, 'image' + str(counter) + '.jpg', args.album_name)
+        upload_photos(session, usb_cam_photo_path, args.album_name)
+        upload_photos(session, ribbon_cam_photo_path, args.album_name)
         
         # delete the jpgs off local storage
         os.remove(usb_cam_photo_path)
