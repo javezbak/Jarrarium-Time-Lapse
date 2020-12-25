@@ -7,7 +7,9 @@ from google.oauth2.credentials import Credentials
 from picamera import PiCamera
 from subprocess import call
 
+from i2c import get_devices
 from datetime import datetime, timedelta
+from decimal import Decimal
 from astral.sun import sun
 from astral import LocationInfo
 
@@ -17,6 +19,7 @@ import argparse
 import logging
 import time
 import pytz
+import re
 
 
 def parse_args(arg_input=None):
@@ -215,12 +218,12 @@ def time_until_daylight(dt_sunrise, dt_sunset, loc):
 def main():
 
     # create a session with Google Photos
-    args = parse_args()# --auth client_id.json --album test
-    session = get_authorized_session(args.auth_file)
+    #args = parse_args()# --auth client_id.json --album test
+    #session = get_authorized_session(args.auth_file)
 
     # initialize ribbon camera
-    camera = PiCamera()
-    camera.resolution = (3280, 2464)
+    #camera = PiCamera()
+    #camera.resolution = (3280, 2464)
 
     # get current location
     with open('location.json') as loc_file:
@@ -234,12 +237,30 @@ def main():
     times = sun(loc.observer, date=datetime.now(), tzinfo=loc.timezone)
     
     # determine time until next daylight, sleep until then
-    sleep_time = time_until_daylight(times["sunrise"], times["sunset"], loc)
-    if sleep_time != 0:
-        time.sleep(sleep_time)
+    #sleep_time = time_until_daylight(times["sunrise"], times["sunset"], loc)
+    #if sleep_time != 0:
+    #    time.sleep(sleep_time)
     
     while True:
         present_dt = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
+        
+        # get readings from sensors
+        device_list = get_devices()
+        for device in device_list:
+            device_reading = device.query('R')
+            device_reading = device_reading.replace("\x00", "")  # remove empty bytes
+            if device_reading.startswith('Success'):
+                matches = re.match(r'(Success) (DO 97|pH 99|RTD 102) : (\d+\.?\d*)$', device_reading)
+                sensor_type = matches.group(2)
+                print(sensor_type)
+                sensor_val =  Decimal(matches.group(3))
+                print(sensor_val)
+                y = 0
+                # send to database
+            elif device_reading.startswith('Error'):
+                raise ValueError(f'An error occured!: {device_reading}')
+            else:
+                raise ValueError(f'Sensor reading returned something unexpected: {device_reading}')
         
         # paths for each jpg file
         usb_cam_photo_path = f"./cam-photos/USB-Cam {present_dt}.jpg"
