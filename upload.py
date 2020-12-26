@@ -218,12 +218,12 @@ def time_until_daylight(dt_sunrise, dt_sunset, loc):
 def main():
 
     # create a session with Google Photos
-    #args = parse_args()# --auth client_id.json --album test
-    #session = get_authorized_session(args.auth_file)
+    args = parse_args()# --auth client_id.json --album test
+    session = get_authorized_session(args.auth_file)
 
     # initialize ribbon camera
-    #camera = PiCamera()
-    #camera.resolution = (3280, 2464)
+    camera = PiCamera()
+    camera.resolution = (3280, 2464)
 
     # get current location
     with open('location.json') as loc_file:
@@ -237,10 +237,11 @@ def main():
     times = sun(loc.observer, date=datetime.now(), tzinfo=loc.timezone)
     
     # determine time until next daylight, sleep until then
-    #sleep_time = time_until_daylight(times["sunrise"], times["sunset"], loc)
-    #if sleep_time != 0:
-    #    time.sleep(sleep_time)
+    sleep_time = time_until_daylight(times["sunrise"], times["sunset"], loc)
+    if sleep_time != 0:
+        time.sleep(sleep_time)
     
+    error_message = ''
     while True:
         present_dt = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
         
@@ -248,15 +249,21 @@ def main():
         device_list = get_devices()
         for device in device_list:
             device_reading = device.query('R')
+            if not device_reading:
+                error_message += f'Tyring to read from {device} yielded an empty result'
+                continue
+            
             device_reading = device_reading.replace("\x00", "")  # remove empty bytes
             if device_reading.startswith('Success'):
                 matches = re.match(r'(Success) (DO 97|pH 99|RTD 102) : (\d+\.?\d*)$', device_reading)
-                sensor_type = matches.group(2)
-                print(sensor_type)
-                sensor_val =  Decimal(matches.group(3))
-                print(sensor_val)
-                y = 0
-                # send to database
+                if matches:
+                    sensor_type = matches.group(2)
+                    sensor_val =  Decimal(matches.group(3))
+                    # send to database
+                else:
+                    error_message += f'One of the sensors had a reading that did not match the regex: {device_reading}'
+                    continue
+    
             elif device_reading.startswith('Error'):
                 raise ValueError(f'An error occured!: {device_reading}')
             else:
