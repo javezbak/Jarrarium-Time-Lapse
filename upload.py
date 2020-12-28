@@ -7,12 +7,14 @@ from google.oauth2.credentials import Credentials
 from picamera import PiCamera
 from subprocess import call
 
+from sql_log import JarrariumSQL
 from i2c import get_devices
 from datetime import datetime, timedelta
 from decimal import Decimal
 from astral.sun import sun
 from astral import LocationInfo
 
+import pymysql
 import json
 import os
 import argparse
@@ -213,12 +215,13 @@ def time_until_daylight(dt_sunrise, dt_sunset, loc):
         tmrw_times = sun(loc.observer, tommorrow, tzinfo=loc.timezone)
         return (tmrw_times["sunrise"] - present).total_seconds()
     
-    raise Exception("No possible criteria for time until daylight was met.")    
+    raise Exception("No possible criteria for time until daylight was met.")
+
 
 def main():
 
     # create a session with Google Photos
-    args = parse_args()# --auth client_id.json --album test
+    args = parse_args() # --auth client_id.json --album test
     session = get_authorized_session(args.auth_file)
 
     # initialize ribbon camera
@@ -241,37 +244,47 @@ def main():
     if sleep_time != 0:
         time.sleep(sleep_time)
     
-    error_message = ''
+    sql_store = JarrariumSQL()
+    sql_store.connect_to_db()
+    
     while True:
-        present_dt = datetime.now().strftime("%m-%d-%Y %H:%M:%S")
+        error_message = ''
+        present_dt = datetime.now()
         
         # get readings from sensors
+        parsed_sensor_readings = dict()
         device_list = get_devices()
         for device in device_list:
-            device_reading = device.query('R')
+            
+            # empty reading
+            device_reading = device.query('R') #ask atlas team diff between this and doing it manually?
             if not device_reading:
-                error_message += f'Tyring to read from {device} yielded an empty result'
+                error_message += f'Tyring to read from {device} yielded an empty result\n\n'
                 continue
             
             device_reading = device_reading.replace("\x00", "")  # remove empty bytes
+            
+            # parse the successful reading
             if device_reading.startswith('Success'):
                 matches = re.match(r'(Success) (DO 97|pH 99|RTD 102) : (\d+\.?\d*)$', device_reading)
                 if matches:
                     sensor_type = matches.group(2)
-                    sensor_val =  Decimal(matches.group(3))
-                    # send to database
+                    sensor_val =  matches.group(3)
+                    parsed_sensor_readings[sensor_type] = sensor_val
                 else:
-                    error_message += f'One of the sensors had a reading that did not match the regex: {device_reading}'
+                    error_message += f'One of the sensors had a reading that did not match the regex. Reading was: {device_reading}\n\n'
                     continue
     
+            # faulty reading
             elif device_reading.startswith('Error'):
-                raise ValueError(f'An error occured!: {device_reading}')
+                error_message += f'An error occured!: {device_reading}\n\n'
             else:
-                raise ValueError(f'Sensor reading returned something unexpected: {device_reading}')
+                error_message += f'Sensor reading returned something unexpected: {device_reading}\n\n'
         
         # paths for each jpg file
-        usb_cam_photo_path = f"./cam-photos/USB-Cam {present_dt}.jpg"
-        ribbon_cam_photo_path = f"./cam-photos/Ribbon-Cam {present_dt}.jpg"
+        camera_time_format = present_dt.strftime("%Y-%m-%d %H_%M_%S")
+        usb_cam_photo_path = f"./cam-photos/USB-Cam {camera_time_format}.jpg"
+        ribbon_cam_photo_path = f"./cam-photos/Ribbon-Cam {camera_time_format}.jpg"
         
         # take photos on both webcams
         call(["fswebcam", "-d","/dev/video0", "-r", "1920x1080", "-S", "20", "--no-banner", usb_cam_photo_path])
@@ -284,6 +297,14 @@ def main():
         # delete the jpgs off local storage
         os.remove(usb_cam_photo_path)
         os.remove(ribbon_cam_photo_path)
+
+        # log recorded sensor readings and names of the photos 
+        sql_store.insert_input(present_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                       parsed_sensor_readings['pH 99'],
+                       parsed_sensor_readings['DO 97'],
+                       parsed_sensor_readings['RTD 102'],
+                       ribbon_cam_photo_path,
+                       usb_cam_photo_path)
         
         # regular sleep interval is 5 minutes, otherwise sleep until next sunrise
         sleep_time = time_until_daylight(times["sunrise"], times["sunset"], loc)
