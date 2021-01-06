@@ -62,9 +62,9 @@ def get_authorized_session(auth_token_file):
         try:
             cred = Credentials.from_authorized_user_file(auth_token_file, scopes)
         except OSError as err:
-            logging.debug("Error opening auth token file - {0}".format(err))
+            logging.error(f"Error opening auth token file - {err}")
         except ValueError:
-            logging.debug("Error loading auth tokens - Incorrect format")
+            logging.error("Error loading auth tokens - Incorrect format")
 
 
     if not cred:
@@ -76,7 +76,7 @@ def get_authorized_session(auth_token_file):
         try:
             save_cred(cred, auth_token_file)
         except OSError as err:
-            logging.debug("Could not save auth tokens - {0}".format(err))
+            logging.debug(f"Could not save auth tokens - {err}")
 
     return session
 
@@ -130,22 +130,22 @@ def create_or_retrieve_album(session, album_title):
     for a in getAlbums(session, True):
         if a["title"].lower() == album_title.lower():
             album_id = a["id"]
-            logging.info("Uploading into EXISTING photo album -- \'{0}\'".format(album_title))
+            logging.info(f"Uploading into EXISTING photo album -- '{album_title}'")
             return album_id
 
 # No matches, create new album
 
     create_album_body = json.dumps({"album":{"title": album_title}})
-    #print(create_album_body)
+    
     resp = session.post('https://photoslibrary.googleapis.com/v1/albums', create_album_body).json()
 
-    logging.debug("Server response: {}".format(resp))
+    logging.debug(f"Server response: {resp}")
 
     if "id" in resp:
-        logging.info("Uploading into NEW photo album -- \'{0}\'".format(album_title))
+        logging.info(f"Uploading into NEW photo album -- {album_title}")
         return resp['id']
     else:
-        logging.error("Could not find or create photo album '\{0}\'. Server Response: {1}".format(album_title, resp))
+        logging.error(f"Could not find or create photo album {album_title}. Server Response: {resp}")
         return None
 
 def upload_photos(session, photo_file_name, album_name):
@@ -163,12 +163,12 @@ def upload_photos(session, photo_file_name, album_name):
         photo_file = open(photo_file_name, mode='rb')
         photo_bytes = photo_file.read()
     except OSError as err:
-        logging.error("Could not read file \'{0}\' -- {1}".format(photo_file_name, err))
+        logging.error("Could not read file {photo_file_name} -- {err}")
         return
 
     session.headers["X-Goog-Upload-File-Name"] = os.path.basename(photo_file_name)
 
-    logging.info("Uploading photo -- \'{}\'".format(photo_file_name))
+    logging.info(f"Uploading photo -- {photo_file_name}")
 
     upload_token = session.post('https://photoslibrary.googleapis.com/v1/uploads', photo_bytes)
 
@@ -178,19 +178,19 @@ def upload_photos(session, photo_file_name, album_name):
 
         resp = session.post('https://photoslibrary.googleapis.com/v1/mediaItems:batchCreate', create_body).json()
 
-        logging.debug("Server response: {}".format(resp))
+        logging.debug(f"Server response: {resp}")
 
         if "newMediaItemResults" in resp:
             status = resp["newMediaItemResults"][0]["status"]
             if status.get("code") and (status.get("code") > 0):
-                logging.error("Could not add \'{0}\' to library -- {1}".format(os.path.basename(photo_file_name), status["message"]))
+                logging.error(f"Could not add {os.path.basename(photo_file_name)} to library -- {status['message']}")
             else:
-                logging.info("Added \'{}\' to library and album \'{}\' ".format(os.path.basename(photo_file_name), album_name))
+                logging.info(f"Added {os.path.basename(photo_file_name)} to library and album {album_name}")
         else:
-            logging.error("Could not add \'{0}\' to library. Server Response -- {1}".format(os.path.basename(photo_file_name), resp))
+            logging.error(f"Could not add {os.path.basename(photo_file_name)} to library. Server Response -- {resp}")
 
     else:
-        logging.error("Could not upload \'{0}\'. Server Response - {1}".format(os.path.basename(photo_file_name), upload_token))
+        logging.error(f"Could not upload {os.path.basename(photo_file_name)}. Server Response - {upload_token}")
 
     try:
         del(session.headers["Content-type"])
