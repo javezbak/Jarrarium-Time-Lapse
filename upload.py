@@ -5,7 +5,7 @@ from google.oauth2.credentials import Credentials
 
 # Capture photos from webcams
 from picamera import PiCamera
-from subprocess import call
+import subprocess
 
 from sql_log import JarrariumSQL
 from i2c import get_devices
@@ -14,6 +14,7 @@ from decimal import Decimal
 from astral.sun import sun
 from astral import LocationInfo
 
+import logging
 import pymysql
 import json
 import os
@@ -218,7 +219,19 @@ def time_until_daylight(dt_sunrise, dt_sunset, loc):
     raise Exception("No possible criteria for time until daylight was met.")
 
 
+def upload_all_photos(directory, session, album_name):
+    for entry in os.scandir(directory):
+        if entry.path.endswith(".jpg"):
+            try:
+                upload_photos(session, entry.path, album_name)
+            except BaseException as e:
+                logging.error(f'Failed to upload {entry.path} to Google Photos, error: {e}')
+            finally:
+                os.remove(entry.path)        
+
 def main():
+
+    logging.basicConfig(format='%(asctime)s - %(message)s', filename='app.log')
 
     # create a session with Google Photos
     args = parse_args() # --auth client_id.json --album test
@@ -247,8 +260,10 @@ def main():
     sql_store = JarrariumSQL()
     sql_store.connect_to_db()
     
+    usb_webcam_device_finder = re.compile(r'HD Webcam C525 \(\S+\):\n\t(\/dev\/video\d{1,2})')
+    ansi_escape = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
+    
     while True:
-        error_message = ''
         present_dt = datetime.now()
         
         # get readings from sensors
@@ -257,9 +272,9 @@ def main():
         for device in device_list:
             
             # empty reading
-            device_reading = device.query('R') #ask atlas team diff between this and doing it manually?
+            device_reading = device.query('R') # ask atlas team diff between this and doing it manually?
             if not device_reading:
-                error_message += f'Tyring to read from {device} yielded an empty result\n\n'
+                logging.error(f'Tyring to read from {device} yielded an empty result\n\n')
                 continue
             
             device_reading = device_reading.replace("\x00", "")  # remove empty bytes
@@ -270,48 +285,92 @@ def main():
                 if matches:
                     sensor_type = matches.group(2)
                     sensor_val =  matches.group(3)
+                    if sensor_type == 'RTD 102':
+                        sensor_val = str((Decimal(sensor_val) * Decimal(9)/Decimal(5)) + 32) # convert celcius to farenheit
                     parsed_sensor_readings[sensor_type] = sensor_val
                 else:
-                    error_message += f'One of the sensors had a reading that did not match the regex. Reading was: {device_reading}\n\n'
-                    continue
+                    logging.error(f'One of the sensors had a reading that did not match the regex. Reading was: {device_reading} \n\n')
     
             # faulty reading
             elif device_reading.startswith('Error'):
-                error_message += f'An error occured!: {device_reading}\n\n'
+                logging.error(f'An error occured!: {device_reading}\n\n')
             else:
-                error_message += f'Sensor reading returned something unexpected: {device_reading}\n\n'
+                logging.error(f'Sensor reading returned something unexpected: {device_reading}\n\n')
         
         # paths for each jpg file
-        camera_time_format = present_dt.strftime("%Y-%m-%d %H_%M_%S")
-        usb_cam_photo_path = f"./cam-photos/USB-Cam {camera_time_format}.jpg"
-        ribbon_cam_photo_path = f"./cam-photos/Ribbon-Cam {camera_time_format}.jpg"
+        camera_time_format = present_dt.strftime("%Y-%m-%d %H_%M_%S") # no colons, since files on Windows can't handle that
         
-        # take photos on both webcams
-        call(["fswebcam", "-d","/dev/video0", "-r", "1920x1080", "-S", "20", "--no-banner", usb_cam_photo_path])
-        camera.capture(ribbon_cam_photo_path) 
+        usb_cam_file = f"USB-Cam {camera_time_format}.jpg"
+        usb_cam_photo_path = f'./cam-photos/usb/{usb_cam_file}'
         
-        # send the jpgs to google photos
-        upload_photos(session, usb_cam_photo_path, args.album_name)
-        upload_photos(session, ribbon_cam_photo_path, args.album_name)
+        ribbon_cam_file = f"Ribbon-Cam {camera_time_format}.jpg"
+        ribbon_cam_photo_path = f'./cam-photos/ribbon/{ribbon_cam_file}'
         
-        # delete the jpgs off local storage
-        os.remove(usb_cam_photo_path)
-        os.remove(ribbon_cam_photo_path)
+        # capture photo from usb cam
+        
+        # find out what device the usb cam is listed as
+        webcam_devices_proc = subprocess.run(['v4l2-ctl', '--list-devices'], text=True, capture_output=True)
+        if webcam_devices_proc.returncode == 0:
+            matches = re.search(r'HD Webcam C525 \(\S+\):\n\t(\/dev\/video\d{1,2})', webcam_devices_proc.stdout)
+            if matches:
+                device = matches.group(1)
+                # discard first 20 images, since it takes a while for the webcam to adjust to brightness
+                completed_process = subprocess.run(["fswebcam", "-d",f"{device}", "-r", "1920x1080", "-S", "20", "--no-banner", usb_cam_photo_path], text=True, capture_output=True)
+                if completed_process.returncode != 0:
+                    usbcam_error = ansi_escape.sub('', completed_process.stderr) + '\n\n' 
+                    logging.error(f'Could not capture image from usb webcam, error: {usbcam_error} \n\n')
+                if not os.path.exists(usb_cam_photo_path):
+                    logging.error(f'Photo at {usb_cam_photo_path} was not found.\n\n')
+                    usb_cam_file = None
+                    usb_cam_photo_path = None
+            else:
+                logging.error(f'The regex could not find the device code for the webcam in the v4l2-ctl --list-devices output. \nOutput: {output}\n\n')            
+        else:
+            error = ansi_escape.sub('', webcam_devices_proc.stderr) + '\n\n'
+            logging.error(f'Could not run the v4l2-ctrl --list devices command, error: {error}' )
+    
+        
+        # capture photo from ribbon cam
+        try:
+            camera.capture(ribbon_cam_photo_path)
+        except BaseException as e:
+             logging.exception("Something went wrong while trying to capture the photo from the ribbon camera.")
+        if not os.path.exists(ribbon_cam_photo_path):
+            logging.error(f'Photo at {ribbon_cam_photo_path} was not found.\n\n')
+            ribbon_cam_file = None
+            ribbon_cam_photo_path = None
+        
+        # send the jpgs to google photos and then delete them off local storage
+        upload_all_photos('./cam-photos/ribbon/', session, args.album_name)
+        upload_all_photos('./cam-photos/usb/', session, args.album_name)
 
         # log recorded sensor readings and names of the photos 
-        sql_store.insert_input(present_dt.strftime("%Y-%m-%d %H:%M:%S"),
-                       parsed_sensor_readings['pH 99'],
-                       parsed_sensor_readings['DO 97'],
-                       parsed_sensor_readings['RTD 102'],
-                       ribbon_cam_photo_path,
-                       usb_cam_photo_path)
+        sql_store.insert_input(present_dt,#present_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                       parsed_sensor_readings.get('pH 99', None),
+                       parsed_sensor_readings.get('DO 97', None),
+                       parsed_sensor_readings.get('RTD 102', None),
+                       ribbon_cam_file,
+                       usb_cam_file)
+        
+        # TODO: BACKLOG ALL SENSOR READING AND ERROR MESSAGES NOT PUT INTO SQL
+        
+        # log any errors encountered during execution of this cycle into the database
+        if os.path.isfile('./app.log') and os.path.getsize('./app.log') > 0:
+            with open("./app.log", 'r') as f:
+                error_message = f.read()
+                sql_store.insert_error(present_dt.strftime("%Y-%m-%d %H:%M:%S"), error_message)
         
         # regular sleep interval is 5 minutes, otherwise sleep until next sunrise
         sleep_time = time_until_daylight(times["sunrise"], times["sunset"], loc)
         if sleep_time == 0:
-            time.sleep(300)
+            time.sleep(30)
         else:
             time.sleep(sleep_time)
+
+        # clear out the log
+        with open("./app.log", 'w') as f:
+            pass        
+        
 
 if __name__ == '__main__':
   main()
