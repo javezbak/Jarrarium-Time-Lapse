@@ -13,10 +13,10 @@ class Webcam:
         self.ribbon_cam_file = None
         self.ribbon_cam_photo_path = None
 
-        self._time = time
-
         self.base_dir_ribbon = "./cam-photos/ribbon/"
         self.base_dir_usb = "./cam-photos/usb/"
+
+        self.time = time
 
         self.ansi_escape = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
 

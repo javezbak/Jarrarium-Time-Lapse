@@ -99,22 +99,24 @@ def main():
     times = sun(loc.observer, date=datetime.now(), tzinfo=loc.timezone)
 
     # determine time until next daylight, sleep until then
-    sleep_time = time_until_daylight(times["sunrise"], times["sunset"], loc)
-    if sleep_time != 0:
-        time.sleep(sleep_time)
+    #sleep_time = time_until_daylight(times["sunrise"], times["sunset"], loc)
+    #if sleep_time != 0:
+    #    time.sleep(sleep_time)
 
     sql_store = DBLog()
     sql_store.connect_to_db()
 
+    wb = Webcam('')
+
     while True:
+     
         present_dt = datetime.now()
 
         # pull pH, dO, and temperature data
         parsed_sensor_readings = get_sensor_data()
 
         # capture photos from both webcams
-        camera_time_formatted = present_dt.strftime("%Y-%m-%d %H_%M_%S")
-        wb = Webcam(camera_time_formatted)
+        wb.time = present_dt.strftime("%Y-%m-%d %H_%M_%S")
         wb.capture_usb_photo()
         wb.capture_ribbon_photo()
 
@@ -132,26 +134,60 @@ def main():
             wb.usb_cam_file,
         )
 
-        # TODO: BACKLOG ALL SENSOR READING AND ERROR MESSAGES NOT PUT INTO SQL
+        # log any old locally stored sensor data
+        if sql_store.local_sensor_data:
+            for dt in list(sql_store.local_sensor_data): 
+                size_of_error_log = os.path.getsize("./app.log")
+                
+                sensor_data = sql_store.local_sensor_data[dt]
+                sql_store.insert_input(
+                                    dt,
+                                    sensor_data[0],
+                                    sensor_data[1],
+                                    sensor_data[2],
+                                    sensor_data[3],
+                                    sensor_data[4],
+                                )
+                
+                updated_size_of_error_log = os.path.getsize("./app.log")
+                if size_of_error_log == updated_size_of_error_log:
+                    del sql_store.local_sensor_data[dt] 
+        
+        # log any old locally stored error messages
+        if sql_store.local_errors:
+            for dt in list(sql_store.local_errors): 
+                size_of_error_log = os.path.getsize("./app.log")
+                
+                sql_store.insert_error(dt, sql_store.local_errors[dt])
+                
+                updated_size_of_error_log = os.path.getsize("./app.log")
+                
+                if size_of_error_log == updated_size_of_error_log:
+                    del sql_store.local_errors[dt]             
 
         # log any errors encountered during execution of this cycle into the database
-        if os.path.isfile("./app.log") and os.path.getsize("./app.log") > 0:
+        if os.path.getsize("./app.log") > 0:
             with open("./app.log", "r") as f:
                 error_message = f.read()
                 sql_store.insert_error(
                     present_dt.strftime("%Y-%m-%d %H:%M:%S"), error_message
                 )
 
+        #print(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         # regular sleep interval is 5 minutes, otherwise sleep until next sunrise
-        sleep_time = time_until_daylight(times["sunrise"], times["sunset"], loc)
-        if sleep_time == 0:
-            time.sleep(30)
-        else:
-            time.sleep(sleep_time)
-
+        #sleep_time = time_until_daylight(times["sunrise"], times["sunset"], loc)
+        #if sleep_time == 0:
+        time.sleep(30)
+        #else:
+        #    time.sleep(sleep_time)
+        #print(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        print('-----------------------------------------------')
+        
         # clear out the log
         with open("./app.log", "w") as f:
             pass
+            
+
 
 
 if __name__ == "__main__":
