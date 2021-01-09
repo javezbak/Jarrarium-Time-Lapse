@@ -85,7 +85,7 @@ def main():
     logging.basicConfig(format="%(asctime)s - %(message)s", filename="app.log")
 
     # establish connection with Google Photos
-    gphotos = GPhoto("--auth client_id.json --album test")
+    #gphotos = GPhoto("--auth client_id.json --album test")
 
     # get current location
     with open("location.json") as loc_file:
@@ -121,8 +121,8 @@ def main():
         wb.capture_ribbon_photo()
 
         # send the jpgs to google photos and then delete them off local storage
-        gphotos.upload_all_photos_in_dir(wb.base_dir_ribbon, "test")
-        gphotos.upload_all_photos_in_dir(wb.base_dir_usb, "test")
+        #gphotos.upload_all_photos_in_dir(wb.base_dir_ribbon, "test")
+        #gphotos.upload_all_photos_in_dir(wb.base_dir_usb, "test")
 
         # log recorded sensor readings and names of the photos
         sql_store.insert_input(
@@ -173,21 +173,20 @@ def main():
                     present_dt.strftime("%Y-%m-%d %H:%M:%S"), error_message
                 )
 
-        #print(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-        # regular sleep interval is 5 minutes, otherwise sleep until next sunrise
-        #sleep_time = time_until_daylight(times["sunrise"], times["sunset"], loc)
-        #if sleep_time == 0:
-        time.sleep(30)
-        #else:
-        #    time.sleep(sleep_time)
-        #print(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-        print('-----------------------------------------------')
-        
         # clear out the log
         with open("./app.log", "w") as f:
             pass
-            
 
+        # regular sleep interval is 5 minutes, otherwise sleep until next sunrise
+        print('Before Sleep')
+        sleep_time = time_until_daylight(times["sunrise"], times["sunset"], loc)
+        if sleep_time == 0:
+            time.sleep(30)
+        else:
+            sql_store.local_errors.clear()
+            sql_store.local_sensor_data.clear()
+            time.sleep(sleep_time)
+        print('After Sleep')
 
 
 if __name__ == "__main__":

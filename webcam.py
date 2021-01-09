@@ -87,7 +87,7 @@ class Webcam:
                     self.clear_usb()
             else:
                 logging.error(
-                    f"The regex could not find the device code for the webcam in the v4l2-ctl --list-devices output. \nOutput: {output}\n\n"
+                    f"The regex could not find the device code for the webcam in the v4l2-ctl --list-devices output. \nOutput: {webcam_devices_proc.stdout}\n\n"
                 )
                 self.clear_usb()
         else:

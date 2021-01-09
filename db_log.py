@@ -29,7 +29,7 @@ class DBLog:
                     cursorclass=pymysql.cursors.DictCursor,
                 )
             except BaseException as e:
-                logging.exception('Could not form a connection to the database \n\n')
+                logging.exception('Could not create a connection to the database \n\n')
                 
 
     def insert_input(self, dt, pH, diss_oxy, temp, ribbon_photo, usb_photo):
@@ -41,37 +41,38 @@ class DBLog:
                           usb_photo_file_name) VALUES
                           (%s, %s, %s, %s, %s, %s)"""
         try:
-            cursor = self.conn.cursor()
-            num_rows_affected = cursor.execute(
-                insert_statement, (dt, pH, diss_oxy, temp, ribbon_photo, usb_photo)
-            )
-            self.conn.commit()
+            with self.conn.cursor() as cursor:
+                num_rows_affected = cursor.execute(
+                    insert_statement, (dt, pH, diss_oxy, temp, ribbon_photo, usb_photo)
+                )
+                if num_rows_affected != 1:
+                    logging.exception(
+                            create_insert_input_error_message(dt, pH, diss_oxy, temp, ribbon_photo, usb_photo, f'Number of rows affected after insertion was {num_rows_affected}')
+                    )
         except pymysql.err.InterfaceError as e:
-            logging.exception(
-                            f"""Insertion into RecordedInput failed with the following values:
-                                                            datetime_recorded={dt},
-                                                            pH={pH},
-                                                            dissolved_oxyen={diss_oxy},
-                                                            temperature_F={temp},
-                                                            ribbon_photo_file_name={ribbon_photo},
-                                                            usb_photo_file_name={usb_photo}
-
-                            Could not connect to the database when trying to insert sensor data \n\n""")
+            logging.error(
+                            create_insert_input_error_message(dt, pH, diss_oxy, temp, ribbon_photo, usb_photo, 'Could not connect to the database when trying to insert sensor data')
+            )
             self.local_sensor_data[dt] = (pH, diss_oxy, temp, ribbon_photo, usb_photo)
             self.connect_to_db()
         except BaseException as e:
             logging.exception(
-                f"""Insertion into RecordedInput failed with the following values:
+                create_insert_input_error_message(dt, pH, diss_oxy, temp, ribbon_photo, usb_photo)
+            )
+            self.local_sensor_data[dt] = (pH, diss_oxy, temp, ribbon_photo, usb_photo)
+            
+
+    def create_insert_input_error_message(dt, pH, diss_oxy, temp, ribbon_photo, usb_photo, error_msg):
+        base_error = f"""Insertion into RecordedInput failed with the following values:
                                 datetime_recorded={dt},
                                 pH={pH},
                                 dissolved_oxyen={diss_oxy},
                                 temperature_F={temp},
                                 ribbon_photo_file_name={ribbon_photo},
                                 usb_photo_file_name={usb_photo} \n\n """
-            )
-            self.local_sensor_data[dt] = (pH, diss_oxy, temp, ribbon_photo, usb_photo)
-        finally:
-            cursor.close()
+        if error_msg:
+            return f'{base_error}{error_msg}\n\n'
+        return base_error
         
 
     def insert_error(self, dt, error):
@@ -79,19 +80,21 @@ class DBLog:
         try:
             with self.conn.cursor() as cursor:
                 sql = insert_statement
-                cursor.execute(sql, (dt, error))
+                num_rows_affected = cursor.execute(sql, (dt, error[:16777214]))
+                    
         except pymysql.err.InterfaceError as e:
-            logging.exception(
-                f"""Insertion into RecordedError failed with the following query: {insert_statement}
-
-                    Could not connect to the database when trying to insert the error \n\n"""
-            )
-            self.local_errors[dt] = error
+            self.local_errors[dt] = create_insert_error_message(dt, error, 'Could not connect to the database when trying to insert error data')
             self.connect_to_db()
         except BaseException as e:
-            logging.exception(
-                f"""Insertion into RecordedError failed with the following query: {insert_statement}"""
-            )
-            self.local_errors[dt] = error
-        finally:
-            cursor.close()
+            self.local_errors[dt] = create_insert_error_message(dt, error)
+            
+
+    def create_insert_error_message(dt, error, error_msg=None):
+        base_error = f"""Insertion into RecordedErrors failed with the following values:
+                                datetime_recorded={dt},
+                                error_message={error}\n\n
+                                """
+        if error_msg:
+            return f'{base_error}\n\n{error_msg}\n\n'
+        return base_error
+            
