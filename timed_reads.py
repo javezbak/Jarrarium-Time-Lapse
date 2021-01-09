@@ -85,7 +85,7 @@ def main():
     logging.basicConfig(format="%(asctime)s - %(message)s", filename="app.log")
 
     # establish connection with Google Photos
-    #gphotos = GPhoto("--auth client_id.json --album test")
+    gphotos = GPhoto()
 
     # get current location
     with open("location.json") as loc_file:
@@ -99,9 +99,9 @@ def main():
     times = sun(loc.observer, date=datetime.now(), tzinfo=loc.timezone)
 
     # determine time until next daylight, sleep until then
-    #sleep_time = time_until_daylight(times["sunrise"], times["sunset"], loc)
-    #if sleep_time != 0:
-    #    time.sleep(sleep_time)
+    sleep_time = time_until_daylight(times["sunrise"], times["sunset"], loc)
+    if sleep_time != 0:
+        time.sleep(sleep_time)
 
     sql_store = DBLog()
     sql_store.connect_to_db()
@@ -121,18 +121,8 @@ def main():
         wb.capture_ribbon_photo()
 
         # send the jpgs to google photos and then delete them off local storage
-        #gphotos.upload_all_photos_in_dir(wb.base_dir_ribbon, "test")
-        #gphotos.upload_all_photos_in_dir(wb.base_dir_usb, "test")
-
-        # log recorded sensor readings and names of the photos
-        sql_store.insert_input(
-            present_dt,
-            parsed_sensor_readings.get("pH 99", None),
-            parsed_sensor_readings.get("DO 97", None),
-            parsed_sensor_readings.get("RTD 102", None),
-            wb.ribbon_cam_file,
-            wb.usb_cam_file,
-        )
+        gphotos.upload_all_photos_in_dir(wb.base_dir_ribbon, "ribbon")
+        gphotos.upload_all_photos_in_dir(wb.base_dir_usb, "usb")
 
         # log any old locally stored sensor data
         if sql_store.local_sensor_data:
@@ -152,18 +142,16 @@ def main():
                 updated_size_of_error_log = os.path.getsize("./app.log")
                 if size_of_error_log == updated_size_of_error_log:
                     del sql_store.local_sensor_data[dt] 
-        
-        # log any old locally stored error messages
-        if sql_store.local_errors:
-            for dt in list(sql_store.local_errors): 
-                size_of_error_log = os.path.getsize("./app.log")
-                
-                sql_store.insert_error(dt, sql_store.local_errors[dt])
-                
-                updated_size_of_error_log = os.path.getsize("./app.log")
-                
-                if size_of_error_log == updated_size_of_error_log:
-                    del sql_store.local_errors[dt]             
+
+        # log recorded sensor readings and names of the photos
+        sql_store.insert_input(
+            present_dt,
+            parsed_sensor_readings.get("pH 99", None),
+            parsed_sensor_readings.get("DO 97", None),
+            parsed_sensor_readings.get("RTD 102", None),
+            wb.ribbon_cam_file,
+            wb.usb_cam_file,
+        )      
 
         # log any errors encountered during execution of this cycle into the database
         if os.path.getsize("./app.log") > 0:
@@ -178,7 +166,6 @@ def main():
             pass
 
         # regular sleep interval is 5 minutes, otherwise sleep until next sunrise
-        print('Before Sleep')
         sleep_time = time_until_daylight(times["sunrise"], times["sunset"], loc)
         if sleep_time == 0:
             time.sleep(30)
@@ -186,7 +173,6 @@ def main():
             sql_store.local_errors.clear()
             sql_store.local_sensor_data.clear()
             time.sleep(sleep_time)
-        print('After Sleep')
 
 
 if __name__ == "__main__":

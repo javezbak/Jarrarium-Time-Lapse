@@ -9,38 +9,8 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 
 
 class GPhoto:
-    def __init__(self, arg_input):
-        args = self._parse_args(arg_input)
-        self._session = self._get_authorized_session(args.auth_file)
-
-    def _parse_args(self, arg_input=None):
-        parser = argparse.ArgumentParser(description="Upload photos to Google Photos.")
-        parser.add_argument(
-            "--auth ",
-            metavar="auth_file",
-            dest="auth_file",
-            help="file for reading/storing user authentication tokens",
-        )
-        parser.add_argument(
-            "--album",
-            metavar="album_name",
-            dest="album_name",
-            help="name of photo album to create (if it doesn't exist). Any uploaded photos will be added to this album.",
-        )
-        parser.add_argument(
-            "--log",
-            metavar="log_file",
-            dest="log_file",
-            help="name of output file for log messages",
-        )
-        parser.add_argument(
-            "photos",
-            metavar="photo",
-            type=str,
-            nargs="*",
-            help="filename of a photo to upload",
-        )
-        return parser.parse_args(arg_input)
+    def __init__(self):
+        self._session = self._get_authorized_session('client_id.json')
 
     def auth(self, scopes):
         flow = InstalledAppFlow.from_client_secrets_file(
@@ -68,10 +38,10 @@ class GPhoto:
         if auth_token_file:
             try:
                 cred = Credentials.from_authorized_user_file(auth_token_file, scopes)
-            except OSError as err:
-                logging.error(f"Error opening auth token file - {err}")
+            except OSError:
+                logging.error(f"Error opening auth token file - {err}\n")
             except ValueError:
-                logging.error("Error loading auth tokens - Incorrect format")
+                logging.exception("Error loading auth tokens - Incorrect format\n")
 
         if not cred:
             cred = self.auth(scopes)
@@ -82,7 +52,7 @@ class GPhoto:
             try:
                 self.save_cred(cred, auth_token_file)
             except OSError as err:
-                logging.debug(f"Could not save auth tokens - {err}")
+                logging.error(f"Could not save auth tokens - {err}")
 
         return session
 
