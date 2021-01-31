@@ -12,9 +12,11 @@ class Webcam:
         self.usb_cam_photo_path = None
         self.ribbon_cam_file = None
         self.ribbon_cam_photo_path = None
-
-        self.base_dir_ribbon = "./cam-photos/ribbon/"
-        self.base_dir_usb = "./cam-photos/usb/"
+        
+        dir_path = os.path.dirname(os.path.realpath(__file__))
+    
+        self.base_dir_ribbon = os.path.join(dir_path, "cam-photos/ribbon/")
+        self.base_dir_usb = os.path.join(dir_path, "cam-photos/usb/")
 
         self.time = time
 
@@ -33,10 +35,12 @@ class Webcam:
         self._time = time_str
 
         self.usb_cam_file = f"USB-Cam {time_str}.jpg"
-        self.usb_cam_photo_path = f"{self.base_dir_usb}{self.usb_cam_file}"
-
+        self.usb_cam_photo_path = os.path.join(self.base_dir_usb, self.usb_cam_file)
+        logging.debug(f'USB cam photo path is {self.usb_cam_photo_path}')
+        
         self.ribbon_cam_file = f"Ribbon-Cam {time_str}.jpg"
-        self.ribbon_cam_photo_path = f"{self.base_dir_ribbon}{self.ribbon_cam_file}"
+        self.ribbon_cam_photo_path = os.path.join(self.base_dir_ribbon, self.ribbon_cam_file)
+        logging.debug(f'Ribbon cam photo path is {self.ribbon_cam_photo_path}')
 
     def clear_usb(self):
         self.usb_cam_file = None

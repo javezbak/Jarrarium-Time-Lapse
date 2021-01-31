@@ -1,3 +1,4 @@
+import os
 import json
 import logging
 import csv
@@ -10,9 +11,10 @@ class DBLog:
         self.local_sensor_data = {}
 
     def connect_to_db(self):
+        dir_path = os.path.dirname(os.path.realpath(__file__))
         if self.conn is not None and self.conn.open:
             self.conn.close()
-        with open("connection_info.json") as conn_file:
+        with open(os.path.join(dir_path, 'connection_info.json')) as conn_file:
             data = json.load(conn_file)["connection"]
             try:
                 self.conn = pymysql.connect(
@@ -28,7 +30,8 @@ class DBLog:
                     cursorclass=pymysql.cursors.DictCursor,
                 )
             except BaseException as e:
-                logging.error("Could not create a connection to the database in connect_to_db() function \n\n")
+                logging.exception("Could not create a connection to the database in connect_to_db() function \n\n")
+                logging.debug('Failed to connect to DB')
 
     def insert_input(self, dt, pH, diss_oxy, temp, ribbon_photo, usb_photo):
         insert_statement = f"""INSERT INTO RecordedInput (datetime_recorded,
@@ -55,8 +58,9 @@ class DBLog:
                             f"Number of rows affected after insertion was {num_rows_affected}",
                         )
                     )
-        except (pymysql.err.InterfaceError, pymysql.err.OperationalError) as e:
-            logging.error(
+                logging.debug('Inserted data into RecordedInput')                
+        except BaseException as e:
+            logging.exception(
                 self.create_insert_input_error_message(
                     dt,
                     pH,
@@ -67,6 +71,7 @@ class DBLog:
                     "Could not reach the database when trying to insert sensor data",
                 )
             )
+            logging.debug('Something went wrong when trying to insert sensor data')
             self.local_sensor_data[dt] = (pH, diss_oxy, temp, ribbon_photo, usb_photo)
             self.connect_to_db()
 
@@ -88,16 +93,6 @@ class DBLog:
         insert_statement = f"""INSERT INTO RecordedErrors(datetime_recorded,error_message) VALUES (%s, %s)"""
         try:
             with self.conn.cursor() as cursor:
-                sql = insert_statement
-                cursor.execute(sql, (dt, error[:16777214]))
+                cursor.execute(insert_statement, (dt, error[:16777214]))
         except BaseException as e:
-            pass
-
-    def create_insert_error_message(self, dt, error, error_msg=None):
-        base_error = f"""Insertion into RecordedErrors failed with the following values:
-                                datetime_recorded={dt},
-                                error_message={error}\n\n
-                                """
-        if error_msg:
-            return f"{base_error}{error_msg}\n\n"
-        return base_error
+            logging.debug('Failed to insert the error into recordedErrors table')

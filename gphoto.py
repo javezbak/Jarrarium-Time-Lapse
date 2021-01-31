@@ -10,11 +10,12 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 
 class GPhoto:
     def __init__(self):
-        self._session = self._get_authorized_session('client_id.json')
+        self.dir_path = os.path.dirname(os.path.realpath(__file__))
+        self._session = self._get_authorized_session(os.path.join(self.dir_path, 'client_id.json'))
 
     def auth(self, scopes):
         flow = InstalledAppFlow.from_client_secrets_file(
-            "client_id.json", scopes=scopes
+            os.path.join(self.dir_path, "client_id.json"), scopes=scopes
         )
 
         credentials = flow.run_local_server(
@@ -39,7 +40,7 @@ class GPhoto:
             try:
                 cred = Credentials.from_authorized_user_file(auth_token_file, scopes)
             except OSError:
-                logging.error(f"Error opening auth token file - {err}\n")
+                logging.exception(f"Error opening auth token file\n")
             except ValueError:
                 logging.exception("Error loading auth tokens - Incorrect format\n")
 
@@ -198,9 +199,9 @@ class GPhoto:
             if entry.path.endswith(".jpg"):
                 try:
                     self.upload_photos(entry.path, album_name)
-                except BaseException as e:
-                    logging.error(
-                        f"Failed to upload {entry.path} to Google Photos, error: {e}"
-                    )
-                finally:
                     os.remove(entry.path)
+                except BaseException as e:
+                    logging.exception(
+                        f"Failed to upload {entry.path} to Google Photos"
+                    )
+
