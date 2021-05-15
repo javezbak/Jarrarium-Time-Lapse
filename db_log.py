@@ -24,8 +24,8 @@ class DBLog:
                     db=data["db"],
                     charset="utf8mb4",
                     connect_timeout=60,
-                    read_timeout=10,
-                    write_timeout=10,
+                    read_timeout=30,
+                    write_timeout=30,
                     autocommit=True,
                     cursorclass=pymysql.cursors.DictCursor,
                 )
@@ -33,25 +33,23 @@ class DBLog:
                 logging.exception("Could not create a connection to the database in connect_to_db() function \n\n")
                 logging.debug('Failed to connect to DB')
 
-    def insert_input(self, dt, pH, diss_oxy, temp, ribbon_photo, usb_photo):
+    def insert_input(self, dt, pH, temp, ribbon_photo, usb_photo):
         insert_statement = f"""INSERT INTO RecordedInput (datetime_recorded,
                           pH,
-                          dissolved_oxygen,
                           temperature_F,
                           ribbon_photo_file_name,
                           usb_photo_file_name) VALUES
-                          (%s, %s, %s, %s, %s, %s)"""
+                          (%s, %s, %s, %s, %s)"""
         try:
             with self.conn.cursor() as cursor:
                 num_rows_affected = cursor.execute(
-                    insert_statement, (dt, pH, diss_oxy, temp, ribbon_photo, usb_photo)
+                    insert_statement, (dt, pH, temp, ribbon_photo, usb_photo)
                 )
                 if num_rows_affected != 1:
                     logging.exception(
                         self.create_insert_input_error_message(
                             dt,
                             pH,
-                            diss_oxy,
                             temp,
                             ribbon_photo,
                             usb_photo,
@@ -64,7 +62,6 @@ class DBLog:
                 self.create_insert_input_error_message(
                     dt,
                     pH,
-                    diss_oxy,
                     temp,
                     ribbon_photo,
                     usb_photo,
@@ -72,16 +69,15 @@ class DBLog:
                 )
             )
             logging.debug('Something went wrong when trying to insert sensor data')
-            self.local_sensor_data[dt] = (pH, diss_oxy, temp, ribbon_photo, usb_photo)
+            self.local_sensor_data[dt] = (pH, temp, ribbon_photo, usb_photo)
             self.connect_to_db()
 
     def create_insert_input_error_message(
-        self, dt, pH, diss_oxy, temp, ribbon_photo, usb_photo, error_msg=None
+        self, dt, pH, temp, ribbon_photo, usb_photo, error_msg=None
     ):
         base_error = f"""Insertion into RecordedInput failed with the following values:
                                 datetime_recorded={dt},
                                 pH={pH},
-                                dissolved_oxyen={diss_oxy},
                                 temperature_F={temp},
                                 ribbon_photo_file_name={ribbon_photo},
                                 usb_photo_file_name={usb_photo} \n\n """

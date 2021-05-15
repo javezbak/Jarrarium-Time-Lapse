@@ -27,7 +27,7 @@ def read_sensor_data(device, cmd):
     # parse the successful reading
     if device_reading.startswith("Success"):
         matches = re.match(
-            r"(Success) (DO 97|pH 99|RTD 102) : (\d+\.?\d*)$", device_reading
+            r"(Success) (pH 99|RTD 102) : (\d+\.?\d*)$", device_reading
         )
         if matches:
             return matches
@@ -65,9 +65,9 @@ def get_sensor_data():
             else:
                 raise ValueError('Could not get a reading from the temperature sensor!')
             
-    # get pH and DO with temperature comepnsation        
+    # get pH with temperature comepnsation        
     for device in device_list:
-        if device.address != 102:
+        if device.address != 102 and device.address != 97:
             if output is not None:                
                 output = read_sensor_data(device, f'RT,{celcius_temp}')
                 sensor_type = output.group(2)
@@ -99,18 +99,28 @@ def time_until_daylight(dt_sunrise, dt_sunset, loc):
     raise Exception("No possible criteria for time until daylight was met.")
 
 
+class Resources:
+    
+    def __init__(self):
+        self.gphotos = GPhoto()
+        self.sql_store = DBLog()
+        self.sql_store.connect_to_db()
+        self.wb = Webcam('')
+        
+    def release(self):
+        self.sql_store.conn.close()
+        self.wb._camera.close()
+        self.gphotos._session.close()
+        
+
 def main():
 
     try:
         # need time to get internet connection once pi starts up
         #time.sleep(120) # if you lower this value and there is a critical error in your code your pi could get stuck in an infinite reboot loop!
-        
         dir_path = os.path.dirname(os.path.realpath(__file__))
         
-        logging.basicConfig(filename=os.path.join(dir_path, "app.log"), level = logging.INFO)
-
-        # establish connection with Google Photos
-        gphotos = GPhoto()
+        logging.basicConfig(filename=os.path.join(dir_path, "app.log"))
 
         # get current location
         with open(os.path.join(dir_path, 'location.json')) as loc_file:
@@ -125,67 +135,57 @@ def main():
 
         # determine time until next daylight, sleep until then
         sleep_time = time_until_daylight(times["sunrise"], times["sunset"], loc)
-        #if sleep_time != 0:
-        #    time.sleep(sleep_time)
-
-        sql_store = DBLog()
-        sql_store.connect_to_db()
-
-        wb = Webcam('')
+        if sleep_time != 0:
+            time.sleep(sleep_time)
+            
+        resources = Resources()        
 
         while True:
             
             present_dt = datetime.now()
 
-            # pull pH, dO, and temperature data
+            # pull pH and temperature data
             parsed_sensor_readings = get_sensor_data()
 
             # capture photos from both webcams
-            wb.time = present_dt.strftime("%Y-%m-%d %H_%M_%S")
-            wb.capture_usb_photo()
-            wb.capture_ribbon_photo()
+            resources.wb.time = present_dt.strftime("%Y-%m-%d %H_%M_%S")
+            resources.wb.capture_usb_photo()
+            resources.wb.capture_ribbon_photo()
 
             # send the jpgs to google photos and then delete them off local storage
-            gphotos.upload_all_photos_in_dir(wb.base_dir_ribbon, "ribbon")
-            gphotos.upload_all_photos_in_dir(wb.base_dir_usb, "usb")
+            resources.gphotos.upload_all_photos_in_dir(resources.wb.base_dir_ribbon, "ribbon")
+            resources.gphotos.upload_all_photos_in_dir(resources.wb.base_dir_usb, "usb")
 
             # log any old locally stored sensor data
-            logging.debug('HELLO')
-            if sql_store.local_sensor_data:
-                logging.debug('Attempting to put in local sensor data into db')
-                for dt in list(sql_store.local_sensor_data): 
+            if resources.sql_store.local_sensor_data:
+                for dt in list(resources.sql_store.local_sensor_data): 
                     size_of_error_log = os.path.getsize("./app.log")
-                    logging.debug(f'Size of error log is : {size_of_error_log}')
-                    sensor_data = sql_store.local_sensor_data[dt]
+                    sensor_data = resources.sql_store.local_sensor_data[dt]
                     sql_store.insert_input(
                                         dt,
                                         sensor_data[0],
                                         sensor_data[1],
                                         sensor_data[2],
-                                        sensor_data[3],
-                                        sensor_data[4],
+                                        sensor_data[3]
                                     )
-                    logging.debug(f'Now its : {size_of_error_log}')
                     updated_size_of_error_log = os.path.getsize("./app.log")
                     if size_of_error_log == updated_size_of_error_log:
-                        logging.debug('Deleting the entry in local sensor data')
-                        del sql_store.local_sensor_data[dt] 
+                        del resources.sql_store.local_sensor_data[dt] 
 
             # log recorded sensor readings and names of the photos
-            sql_store.insert_input(
+            resources.sql_store.insert_input(
                 present_dt,
                 parsed_sensor_readings.get("pH 99", None),
-                parsed_sensor_readings.get("DO 97", None),
                 parsed_sensor_readings.get("RTD 102", None),
-                wb.ribbon_cam_file,
-                wb.usb_cam_file,
+                resources.wb.ribbon_cam_file,
+                resources.wb.usb_cam_file,
             )      
 
             # log any errors encountered during execution of this cycle into the database
             if os.path.getsize("./app.log") > 0:
                 with open("./app.log", "r") as f:
                     error_message = f.read()
-                    sql_store.insert_error(
+                    resources.sql_store.insert_error(
                         present_dt.strftime("%Y-%m-%d %H:%M:%S"), error_message
                     )
 
@@ -195,11 +195,14 @@ def main():
 
             # regular sleep interval is 5 minutes, otherwise sleep until next sunrise
             sleep_time = time_until_daylight(times["sunrise"], times["sunset"], loc)
-            #if sleep_time == 0:
-            time.sleep(30)
-            #else:
-            #    sql_store.local_sensor_data.clear()
-            #    time.sleep(sleep_time)
+            if sleep_time == 0:
+                time.sleep(300)
+            else:
+                resources.release()
+                time.sleep(sleep_time)
+                resources = Resources()
+                times = sun(loc.observer, date=datetime.now(), tzinfo=loc.timezone)
+                
             
     except BaseException as e:
         logging.exception('Something went wrong in the __main__ script. Restarting the pi.\n')

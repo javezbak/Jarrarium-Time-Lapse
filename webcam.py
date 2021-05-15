@@ -108,7 +108,6 @@ class Webcam:
             logging.exception(
                 "Something went wrong while trying to capture the photo from the ribbon camera."
             )
-            self.clear_ribbon()
         if not os.path.exists(self.ribbon_cam_photo_path):
             logging.error(f"Photo at {self.ribbon_cam_photo_path} was not found.\n\n")
             self.clear_ribbon()
