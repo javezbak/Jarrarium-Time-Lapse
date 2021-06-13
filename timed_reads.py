@@ -117,7 +117,7 @@ def main():
 
     try:
         # need time to get internet connection once pi starts up
-        #time.sleep(120) # if you lower this value and there is a critical error in your code your pi could get stuck in an infinite reboot loop!
+        time.sleep(120) # if you lower this value and there is a critical error in your code your pi could get stuck in an infinite reboot loop!
         dir_path = os.path.dirname(os.path.realpath(__file__))
         
         logging.basicConfig(filename=os.path.join(dir_path, "app.log"))
@@ -206,7 +206,7 @@ def main():
             
     except BaseException as e:
         logging.exception('Something went wrong in the __main__ script. Restarting the pi.\n')
-        #os.system('sudo reboot')
+        os.system('sudo reboot')
 
 
 if __name__ == "__main__":
